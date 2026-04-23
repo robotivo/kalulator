@@ -143,7 +143,7 @@
       <div id="panel-kalkulator" class="panel active">
         <div class="card">
           <div class="card-title">Wynajem robota humanoidalnego</div>
-          <div class="hint">Cennik za 1 robota: 1 dzień - 5 400 PLN netto, 2 dni - 9 900 PLN netto, 3 dni - 14 900 PLN netto. Każdy kolejny dzień doliczany jest po 5 400 PLN netto.</div>
+          <div class="hint">Cennik za 1 robota: 1 dzień - 5 950 PLN netto, 2 dni - 10 950 PLN netto, 3 dni - 15 450 PLN netto. Każdy kolejny dzień doliczany jest po 5 950 PLN netto.</div>
           <div class="row"><label>Liczba robotów</label><input class="w-xs req" type="number" id="robots" value="1" min="1" max="10"><span class="unit">szt.</span></div>
           <div class="row"><label>Data rozpoczęcia</label><input class="w-md req" type="date" id="ds"></div>
           <div class="row"><label>Data zakończenia</label><input class="w-md req" type="date" id="de"></div>
@@ -157,7 +157,7 @@
             <span class="tog-label">Uwzględnij transport</span>
           </div>
           <div class="sub" id="sub-transport">
-            <div class="row"><label>Odległość w jedną stronę<small>Stawka: 2 PLN / km</small></label><input class="w-sm" type="number" id="km" value="100" min="0" step="10"><span class="unit">km</span></div>
+            <div class="row"><label>Odległość w jedną stronę<small>Stawka: 1,50 PLN / km</small></label><input class="w-sm" type="number" id="km" value="100" min="0" step="10"><span class="unit">km</span></div>
             <div class="row"><label>Kursy</label>
               <select class="w-lg" id="trips">
                 <option value="2">Dostawa + odbiór</option>
@@ -249,7 +249,7 @@
 <footer>Robotivo - narzędzie wewnętrzne | Oferty wynajmu robotów humanoidalnych</footer>
 
 <script>
-const ONE_DAY_RATE=5400, TWO_DAY_RATE=9900, THREE_DAY_RATE=14900, EXTRA_DAY_RATE=5400, KM_RATE=2, VAT_RATE=.23;
+const ONE_DAY_RATE=5950, TWO_DAY_RATE=10950, THREE_DAY_RATE=15450, EXTRA_DAY_RATE=5950, KM_RATE=1.5, VAT_RATE=.23;
 const toggles={transport:false,accom:false,extra1:false,extra2:false};
 const draftKey="robotivo-offer-draft-v2";
 const stateIds=["f-name","f-addr","f-nip","f-iban","f-tel","f-mail","f-contact","o-client","o-caddr","o-cnip","o-cperson","o-nr","o-place","o-valid","o-deposit","discount","o-notes","robots","ds","de","km","trips","accom-city","accom-rate","accom-pers","accom-mode","accom-n","e1-name","e1-val","e2-name","e2-val"];
@@ -351,7 +351,7 @@ function calc(){
   if(toggles.transport){
     const km=nv("km"), trips=document.getElementById("trips").value==="2"?2:1;
     tr=km*trips*KM_RATE;
-    document.getElementById("b-tr-l").textContent=`Transport (${km} km x ${trips} x 2,00 PLN/km)`;
+    document.getElementById("b-tr-l").textContent=`Transport (${km} km x ${trips} x 1,50 PLN/km)`;
     document.getElementById("b-tr-v").textContent=plnFmt(tr);
     document.getElementById("m-tr").textContent=plnInt(tr);
   }else document.getElementById("m-tr").textContent="-";
@@ -438,7 +438,7 @@ function buildRows(){
   const rows=[{name:"Wynajem robota humanoidalnego",detail:`${days} dni x ${robots} szt. - pakiet ${plnFmt(rent/robots)} / szt.`,netto:rent}];
   if(toggles.transport){
     const km=nv("km"), trips=document.getElementById("trips").value==="2"?2:1;
-    rows.push({name:"Transport",detail:`${km} km x ${trips} kurs x 2,00 PLN/km`,netto:km*trips*KM_RATE});
+    rows.push({name:"Transport",detail:`${km} km x ${trips} kurs x 1,50 PLN/km`,netto:km*trips*KM_RATE});
   }
   if(toggles.accom){
     const r=nv("accom-rate"), p=Math.max(1,parseInt(document.getElementById("accom-pers").value,10)||1), nights=getNights(days), city=v("accom-city");
