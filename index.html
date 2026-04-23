@@ -454,103 +454,214 @@ function buildRows(){
   return rows;
 }
 
-function generatePDF(){
+// Font cache so we only fetch once per session
+const _fontCache={};
+async function fetchFontB64(url){
+  if(_fontCache[url])return _fontCache[url];
+  const resp=await fetch(url);
+  const buf=await resp.arrayBuffer();
+  const bytes=new Uint8Array(buf);
+  let bin="";for(let i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);
+  _fontCache[url]=btoa(bin);
+  return _fontCache[url];
+}
+
+async function generatePDF(){
   if(!window.jspdf){setStatus("Biblioteka PDF jeszcze się ładuje. Spróbuj za chwilę.",true);return;}
   if(!validateForPdf())return;
 
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
-  const W=210,H=297,m=18,TW=174,GREEN=[15,110,86],DARK=[25,25,25],MED=[100,100,100],LIGHT=[220,220,220],BG=[244,248,245],WHITE=[255,255,255];
-  let y=38;
-  const rows=buildRows(), totalNet=rows.reduce((s,r)=>s+r.netto,0), vat=totalNet*VAT_RATE, gross=totalNet+vat;
-  const depPct=Math.min(100,Math.max(0,nv("o-deposit")||20)), depAmt=gross*(depPct/100), valid=nv("o-valid")||3, ofNr=getOfferNr();
-  const now=new Date(), validUntil=new Date(now);validUntil.setDate(validUntil.getDate()+valid);
-  const fmt=d=>d.toLocaleDateString("pl-PL");
-  const dsDate=dateFromInput(document.getElementById("ds").value), deDate=dateFromInput(document.getElementById("de").value), days=getDays(), robots=Math.max(1,parseInt(document.getElementById("robots").value,10)||1);
+  setStatus("Przygotowywanie czcionek...",false);
+  const btn=document.querySelector(".btn-primary");
+  btn.disabled=true;btn.textContent="Generuję...";
 
-  function ensureSpace(height){
-    if(y+height>H-24){doc.addPage();y=20;}
+  try{
+    // Load Roboto TTF from jsDelivr (reliable CDN, has Polish chars)
+    const BASE="https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/";
+    const [fontR,fontB]=await Promise.all([
+      fetchFontB64(BASE+"roboto-latin-ext-400-normal.woff2").catch(()=>null),
+      fetchFontB64(BASE+"roboto-latin-ext-700-normal.woff2").catch(()=>null),
+    ]);
+
+    const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+
+    // Register Roboto if loaded, fall back to helvetica gracefully
+    let useRoboto=false;
+    if(fontR&&fontB){
+      try{
+        doc.addFileToVFS("Roboto-Regular.woff2",fontR);
+        doc.addFont("Roboto-Regular.woff2","Roboto","normal");
+        doc.addFileToVFS("Roboto-Bold.woff2",fontB);
+        doc.addFont("Roboto-Bold.woff2","Roboto","bold");
+        useRoboto=true;
+      }catch(e){console.warn("Font register failed",e);}
+    }
+
+    const F=useRoboto?"Roboto":"helvetica";
+    const W=210,H=297,m=18,TW=174;
+    const GREEN=[15,110,86],DARK=[25,25,25],MED=[110,110,110],LIGHT=[225,232,228],BG=[244,248,245],WHITE=[255,255,255],MINT=[225,245,238];
+    let y=38;
+    const rows=buildRows(), totalNet=rows.reduce((s,r)=>s+r.netto,0), vat=totalNet*VAT_RATE, gross=totalNet+vat;
+    const depPct=Math.min(100,Math.max(0,nv("o-deposit")||20)), depAmt=gross*(depPct/100), valid=nv("o-valid")||3, ofNr=getOfferNr();
+    const now=new Date(), validUntil=new Date(now);validUntil.setDate(validUntil.getDate()+valid);
+    const fmt=d=>d.toLocaleDateString("pl-PL");
+    const dsDate=dateFromInput(document.getElementById("ds").value), deDate=dateFromInput(document.getElementById("de").value), days=getDays(), robots=Math.max(1,parseInt(document.getElementById("robots").value,10)||1);
+
+    function setF(style,size,color){
+      doc.setFont(F,style);
+      doc.setFontSize(size);
+      if(color)doc.setTextColor(...color);
+    }
+    function ensureSpace(height){
+      if(y+height>H-24){doc.addPage();y=20;}
+    }
+    function writeWrapped(text,x,yy,width,lineHeight){
+      const lines=doc.splitTextToSize(text,width);
+      doc.text(lines,x,yy);
+      return yy+(lines.length*lineHeight);
+    }
+
+    // ── HEADER BAR ──────────────────────────────────────────────
+    doc.setFillColor(...GREEN);doc.rect(0,0,W,32,"F");
+    // Subtle white stripe accent
+    doc.setFillColor(255,255,255,0.08);doc.rect(0,28,W,4,"F");
+
+    setF("bold",22,WHITE);doc.text("ROBOTIVO",m,15);
+    setF("normal",8,[180,230,215]);doc.text("Wynajem robotów humanoidalnych",m,22);
+    setF("normal",7.5,[160,215,200]);doc.text("OFERTA HANDLOWA",m,29);
+
+    setF("bold",9,WHITE);doc.text(`Nr: ${ofNr}`,W-m,13,{align:"right"});
+    setF("normal",7.8,[200,235,225]);
+    doc.text(`Data wystawienia: ${fmt(now)}`,W-m,20,{align:"right"});
+    doc.text(`Ważna do: ${fmt(validUntil)}`,W-m,27,{align:"right"});
+
+    // ── WYSTAWCA / KLIENT CARDS ──────────────────────────────────
+    const cardW=(TW-6)/2, c1x=m, c2x=m+cardW+6;
+    const cardH=46;
+
+    // Card backgrounds
+    doc.setFillColor(...BG);
+    doc.roundedRect(c1x,y,cardW,cardH,2,2,"F");
+    doc.roundedRect(c2x,y,cardW,cardH,2,2,"F");
+
+    // Green top accent bar on each card
+    doc.setFillColor(...GREEN);
+    doc.roundedRect(c1x,y,cardW,7,2,2,"F");
+    doc.rect(c1x,y+3,cardW,4,"F"); // bottom half flat
+    doc.roundedRect(c2x,y,cardW,7,2,2,"F");
+    doc.rect(c2x,y+3,cardW,4,"F");
+
+    // Card labels
+    setF("bold",7,WHITE);
+    doc.text("WYSTAWCA",c1x+4,y+5);
+    doc.text("KLIENT",c2x+4,y+5);
+
+    // Company name - large, dark
+    setF("bold",10,DARK);
+    doc.text(v("f-name")||"Robotivo",c1x+4,y+15,{maxWidth:cardW-8});
+    doc.text(v("o-client"),c2x+4,y+15,{maxWidth:cardW-8});
+
+    // Details - smaller, muted
+    setF("normal",7.8,MED);
+    doc.text(v("f-addr"),c1x+4,y+22,{maxWidth:cardW-8});
+    doc.text(v("o-caddr")||"—",c2x+4,y+22,{maxWidth:cardW-8});
+    doc.text(`NIP: ${v("f-nip")}`,c1x+4,y+31);
+    doc.text(`NIP: ${v("o-cnip")||"—"}`,c2x+4,y+31);
+    doc.text(v("f-tel"),c1x+4,y+37);
+    doc.text(v("f-mail"),c1x+4,y+43);
+    if(v("o-cperson"))doc.text(v("o-cperson"),c2x+4,y+37,{maxWidth:cardW-8});
+    y+=cardH+10;
+
+    // ── SUBJECT LINE ─────────────────────────────────────────────
+    doc.setDrawColor(...LIGHT);doc.setLineWidth(.3);doc.line(m,y,W-m,y);y+=7;
+    setF("bold",10,DARK);doc.text("Przedmiot oferty",m,y);y+=5;
+    setF("normal",8.5,MED);
+    y=writeWrapped(`Wynajem robota humanoidalnego (${robots} szt.) w okresie ${fmt(dsDate)} – ${fmt(deDate)} (${days} dni).`,m,y,TW,4.5);
+    y=writeWrapped(`Miejsce realizacji: ${v("o-place")}.`,m,y+1,TW,4.5)+5;
+
+    // ── ITEMS TABLE ───────────────────────────────────────────────
+    const rh=8.5,co0=m,co1=m+TW*.43,co2=m+TW*.78,cw0=TW*.43,cw1=TW*.35,cw2=TW*.22;
+    ensureSpace(18+rows.length*12);
+    doc.setFillColor(...GREEN);doc.rect(m,y,TW,rh,"F");
+    setF("bold",8,WHITE);
+    doc.text("Opis",co0+3,y+5.8);doc.text("Kalkulacja",co1+3,y+5.8);doc.text("Kwota netto",co2+cw2-3,y+5.8,{align:"right"});
+    y+=rh;
+
+    rows.forEach((r,i)=>{
+      ensureSpace(12);
+      const rowH=r.detail?10:8;
+      doc.setFillColor(i%2===0?244:250,i%2===0?248:252,i%2===0?245:250);
+      doc.rect(m,y,TW,rowH,"F");
+      setF("bold",8.2,DARK);doc.text(r.name,co0+3,y+4.5,{maxWidth:cw0-6});
+      if(r.detail){setF("normal",7.2,MED);doc.text(r.detail,co1+3,y+6,{maxWidth:cw1-4});}
+      setF("bold",8.5,DARK);doc.text(plnFmt(r.netto),co2+cw2-3,y+(r.detail?6:5),{align:"right"});
+      y+=rowH;
+    });
+    doc.setDrawColor(...LIGHT);doc.line(m,y,W-m,y);y+=7;
+
+    // ── TOTALS ────────────────────────────────────────────────────
+    const sx=m+TW*.52,sw=TW*.48;
+    function srow(lbl,val,bold=false){
+      setF(bold?"bold":"normal",8.5,MED);doc.text(lbl,sx,y);
+      setF(bold?"bold":"normal",8.5,DARK);doc.text(val,sx+sw,y,{align:"right"});
+      y+=5.5;
+    }
+    ensureSpace(52);
+    srow("Razem netto:",plnFmt(totalNet));
+    srow("VAT 23%:",plnFmt(vat));
+    y+=3;
+    doc.setFillColor(...GREEN);doc.roundedRect(sx-4,y-4,sw+7,11,1.5,1.5,"F");
+    setF("bold",11,WHITE);doc.text("RAZEM BRUTTO:",sx,y+4);doc.text(plnFmt(gross),sx+sw,y+4,{align:"right"});
+    y+=16;
+
+    // ── DEPOSIT BOX ───────────────────────────────────────────────
+    ensureSpace(22);
+    doc.setFillColor(...MINT);doc.roundedRect(m,y,TW,20,2,2,"F");
+    doc.setDrawColor(...GREEN);doc.setLineWidth(.8);doc.roundedRect(m,y,TW,20,2,2,"S");
+    // Green left accent strip
+    doc.setFillColor(...GREEN);doc.roundedRect(m,y,4,20,2,2,"F");doc.rect(m+2,y,2,20,"F");
+
+    setF("bold",9,GREEN);
+    doc.text(`Zaliczka rezerwacyjna ${depPct}% – warunek potwierdzenia terminu:`,m+8,y+8);
+    setF("bold",12.5,DARK);doc.text(`${plnFmt(depAmt)} brutto`,m+8,y+16);
+    setF("normal",7.5,MED);doc.text(`Nr konta: ${v("f-iban")||"—"}`,W-m,y+16,{align:"right"});
+    y+=27;
+
+    // ── TERMS BOX ────────────────────────────────────────────────
+    ensureSpace(36);
+    const notes=v("o-notes");
+    const baseNotes=`Oferta ważna ${valid} ${valid===1?"dzień":"dni"} od daty wystawienia (do ${fmt(validUntil)}). Termin realizacji rezerwowany po zaksięgowaniu zaliczki ${depPct}% wartości brutto. Ceny netto, powiększone o podatek VAT 23%.`;
+    const fullNotes=notes?baseNotes+" "+notes:baseNotes;
+    doc.setFillColor(...BG);doc.roundedRect(m,y,TW,30,2,2,"F");
+    setF("bold",7.8,DARK);doc.text("Warunki oferty:",m+4,y+7);
+    setF("normal",7.6,MED);doc.text(doc.splitTextToSize(fullNotes,TW-8),m+4,y+13);
+    y+=36;
+
+    // ── SIGNATURE ─────────────────────────────────────────────────
+    if(v("f-contact")){
+      ensureSpace(30);
+      doc.setDrawColor(...LIGHT);doc.line(m,y+16,m+65,y+16);
+      setF("normal",8,MED);doc.text(v("f-contact"),m,y+21);
+      doc.text("Podpis / pieczęć",m,y+27);
+    }
+
+    // ── FOOTER BAR ────────────────────────────────────────────────
+    doc.setFillColor(...GREEN);doc.rect(0,H-16,W,16,"F");
+    setF("bold",9,WHITE);doc.text("Robotivo",m,H-9);
+    setF("normal",7.5,[190,230,215]);
+    doc.text(`${v("f-contact")?v("f-contact")+" | ":""}${v("f-tel")} | ${v("f-mail")}`,m,H-4);
+    setF("normal",7,[160,210,195]);
+    doc.text(`Oferta nr ${ofNr} – wystawiona ${fmt(now)}`,W-m,H-4,{align:"right"});
+
+    const safeClient=(v("o-client")||"klient").replace(/[^a-zA-Z0-9\-_]/g,"_").substring(0,30);
+    doc.save(`Oferta_${ofNr.replace(/\//g,"-")}_${safeClient}.pdf`);
+    setStatus("PDF został wygenerowany ✓",false);
+  }catch(err){
+    console.error(err);
+    setStatus("Błąd generowania PDF: "+err.message,true);
+  }finally{
+    btn.disabled=false;btn.textContent="Generuj PDF";
   }
-  function writeWrapped(text,x,yy,width,lineHeight){
-    const lines=doc.splitTextToSize(text,width);
-    doc.text(lines,x,yy);
-    return yy+(lines.length*lineHeight);
-  }
-
-  doc.setFillColor(...GREEN);doc.rect(0,0,W,30,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(20);doc.setTextColor(...WHITE);doc.text("ROBOTIVO",m,14);
-  doc.setFont("helvetica","normal");doc.setFontSize(8.5);doc.text("Wynajem robotow humanoidalnych",m,21);
-  doc.setFontSize(8);doc.text("OFERTA HANDLOWA",m,27);
-  doc.setFont("helvetica","bold");doc.setFontSize(9);doc.text(`Nr: ${ofNr}`,W-m,13,{align:"right"});
-  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.text(`Data wystawienia: ${fmt(now)}`,W-m,19,{align:"right"});
-  doc.text(`Oferta wazna do: ${fmt(validUntil)}`,W-m,25,{align:"right"});
-
-  doc.setFillColor(...BG);doc.roundedRect(m,y,TW/2-3,42,2,2,"F");doc.roundedRect(m+TW/2+3,y,TW/2-3,42,2,2,"F");
-  const c1=m+4,c2=m+TW/2+7;
-  doc.setFont("helvetica","bold");doc.setFontSize(7.5);doc.setTextColor(...GREEN);doc.text("WYSTAWCA",c1,y+7);doc.text("KLIENT",c2,y+7);
-  doc.setFontSize(10);doc.setTextColor(...DARK);doc.text(v("f-name")||"Robotivo",c1,y+14,{maxWidth:TW/2-10});doc.text(v("o-client"),c2,y+14,{maxWidth:TW/2-10});
-  doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(...MED);
-  doc.text(v("f-addr"),c1,y+20,{maxWidth:TW/2-8});doc.text(v("o-caddr")||"-",c2,y+20,{maxWidth:TW/2-10});
-  doc.text(`NIP: ${v("f-nip")}`,c1,y+29);doc.text(`NIP: ${v("o-cnip")||"-"}`,c2,y+29);
-  doc.text(v("f-tel"),c1,y+35);doc.text(v("f-mail"),c1,y+40);
-  if(v("o-cperson"))doc.text(v("o-cperson"),c2,y+35,{maxWidth:TW/2-10});
-  y+=50;
-
-  doc.setDrawColor(...LIGHT);doc.setLineWidth(.3);doc.line(m,y,W-m,y);y+=7;
-  doc.setFont("helvetica","bold");doc.setFontSize(10);doc.setTextColor(...DARK);doc.text("Przedmiot oferty",m,y);y+=5;
-  doc.setFont("helvetica","normal");doc.setFontSize(8.5);doc.setTextColor(...MED);
-  y=writeWrapped(`Wynajem robota humanoidalnego (${robots} szt.) w okresie ${fmt(dsDate)} - ${fmt(deDate)} (${days} dni).`,m,y,TW,4.5);
-  y=writeWrapped(`Miejsce realizacji: ${v("o-place")}.`,m,y+1,TW,4.5)+4;
-
-  const rh=8.5,co0=m,co1=m+TW*.43,co2=m+TW*.78,cw0=TW*.43,cw1=TW*.35,cw2=TW*.22;
-  ensureSpace(18+rows.length*12);
-  doc.setFillColor(...GREEN);doc.rect(m,y,TW,rh,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(...WHITE);
-  doc.text("Opis",co0+3,y+5.8);doc.text("Kalkulacja",co1+3,y+5.8);doc.text("Kwota netto",co2+cw2-3,y+5.8,{align:"right"});y+=rh;
-  rows.forEach((r,i)=>{
-    ensureSpace(12);
-    const rowH=r.detail?10:8;
-    doc.setFillColor(i%2===0?244:255,i%2===0?248:255,i%2===0?245:255);doc.rect(m,y,TW,rowH,"F");
-    doc.setFont("helvetica","bold");doc.setFontSize(8.2);doc.setTextColor(...DARK);doc.text(r.name,co0+3,y+4.5,{maxWidth:cw0-6});
-    if(r.detail){doc.setFont("helvetica","normal");doc.setFontSize(7.2);doc.setTextColor(...MED);doc.text(r.detail,co1+3,y+6,{maxWidth:cw1-4});}
-    doc.setFont("helvetica","bold");doc.setFontSize(8.5);doc.setTextColor(...DARK);doc.text(plnFmt(r.netto),co2+cw2-3,y+(r.detail?6:5),{align:"right"});
-    y+=rowH;
-  });
-  doc.setDrawColor(...LIGHT);doc.line(m,y,W-m,y);y+=6;
-
-  const sx=m+TW*.52,sw=TW*.48;
-  function srow(lbl,val){doc.setFont("helvetica","normal");doc.setFontSize(8.5);doc.setTextColor(...MED);doc.text(lbl,sx,y);doc.setTextColor(...DARK);doc.text(val,sx+sw,y,{align:"right"});y+=5.5;}
-  ensureSpace(48);
-  srow("Razem netto:",plnFmt(totalNet));srow("VAT 23%:",plnFmt(vat));y+=2;
-  doc.setFillColor(...GREEN);doc.roundedRect(sx-4,y-4,sw+7,10,1.5,1.5,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(11);doc.setTextColor(...WHITE);doc.text("RAZEM BRUTTO:",sx,y+3);doc.text(plnFmt(gross),sx+sw,y+3,{align:"right"});y+=14;
-
-  doc.setFillColor(225,245,238);doc.roundedRect(m,y,TW,18,2,2,"F");doc.setDrawColor(...GREEN);doc.setLineWidth(.7);doc.roundedRect(m,y,TW,18,2,2,"S");
-  doc.setFont("helvetica","bold");doc.setFontSize(9.5);doc.setTextColor(...GREEN);doc.text(`Zaliczka rezerwacyjna ${depPct}% - warunek potwierdzenia terminu:`,m+5,y+7);
-  doc.setFontSize(12);doc.text(`${plnFmt(depAmt)} brutto`,m+5,y+14);
-  doc.setFont("helvetica","normal");doc.setFontSize(7.5);doc.setTextColor(...MED);doc.text(`Nr konta: ${v("f-iban")||"-"}`,W-m,y+14,{align:"right"});y+=24;
-
-  ensureSpace(38);
-  const notes=v("o-notes");
-  const baseNotes=`Oferta wazna ${valid} ${valid===1?"dzien":"dni"} od daty wystawienia (do ${fmt(validUntil)}). Termin realizacji jest rezerwowany po zaksiegowaniu zaliczki w wysokosci ${depPct}% wartosci brutto oferty. Ceny netto, powiekszone o podatek VAT 23%.`;
-  const fullNotes=notes?baseNotes+" "+notes:baseNotes;
-  doc.setFillColor(...BG);doc.roundedRect(m,y,TW,28,2,2,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(...DARK);doc.text("Warunki oferty:",m+4,y+7);
-  doc.setFont("helvetica","normal");doc.setFontSize(7.8);doc.setTextColor(...MED);doc.text(doc.splitTextToSize(fullNotes,TW-8),m+4,y+13);y+=34;
-
-  if(v("f-contact")){
-    ensureSpace(28);
-    doc.setDrawColor(...LIGHT);doc.line(m,y+15,m+60,y+15);
-    doc.setFont("helvetica","normal");doc.setFontSize(8);doc.setTextColor(...MED);doc.text(v("f-contact"),m,y+20);doc.text("Podpis / pieczec",m,y+25);
-  }
-  doc.setFillColor(...GREEN);doc.rect(0,H-18,W,18,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(9);doc.setTextColor(...WHITE);doc.text("Robotivo",m,H-10);
-  doc.setFont("helvetica","normal");doc.setFontSize(7.5);doc.text(`${v("f-contact")?v("f-contact")+" | ":""}${v("f-tel")} | ${v("f-mail")}`,m,H-5);
-  doc.setFont("helvetica","italic");doc.setFontSize(7);doc.text(`Oferta nr ${ofNr} - wystawiona ${fmt(now)}`,W-m,H-5,{align:"right"});
-
-  const safeClient=(v("o-client")||"klient").replace(/[^a-zA-Z0-9\-_]/g,"_").substring(0,30);
-  doc.save(`Oferta_${ofNr.replace(/\//g,"-")}_${safeClient}.pdf`);
-  setStatus("PDF został wygenerowany.",false);
 }
 
 document.addEventListener("DOMContentLoaded",()=>{
