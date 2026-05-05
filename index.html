@@ -475,11 +475,11 @@ async function generatePDF(){
   btn.disabled=true;btn.textContent="Generuję...";
 
   try{
-    // Load Roboto TTF from jsDelivr (reliable CDN, has Polish chars)
-    const BASE="https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/";
+    // Load Roboto TTF from jsDelivr — jsPDF wymaga TTF, nie woff2
+    const BASE="https://cdn.jsdelivr.net/npm/roboto-fontface@0.10.0/fonts/roboto/";
     const [fontR,fontB]=await Promise.all([
-      fetchFontB64(BASE+"roboto-latin-ext-400-normal.woff2").catch(()=>null),
-      fetchFontB64(BASE+"roboto-latin-ext-700-normal.woff2").catch(()=>null),
+      fetchFontB64(BASE+"Roboto-Regular.ttf").catch(()=>null),
+      fetchFontB64(BASE+"Roboto-Bold.ttf").catch(()=>null),
     ]);
 
     const {jsPDF}=window.jspdf;
@@ -489,10 +489,10 @@ async function generatePDF(){
     let useRoboto=false;
     if(fontR&&fontB){
       try{
-        doc.addFileToVFS("Roboto-Regular.woff2",fontR);
-        doc.addFont("Roboto-Regular.woff2","Roboto","normal");
-        doc.addFileToVFS("Roboto-Bold.woff2",fontB);
-        doc.addFont("Roboto-Bold.woff2","Roboto","bold");
+        doc.addFileToVFS("Roboto-Regular.ttf",fontR);
+        doc.addFont("Roboto-Regular.ttf","Roboto","normal");
+        doc.addFileToVFS("Roboto-Bold.ttf",fontB);
+        doc.addFont("Roboto-Bold.ttf","Roboto","bold");
         useRoboto=true;
       }catch(e){console.warn("Font register failed",e);}
     }
