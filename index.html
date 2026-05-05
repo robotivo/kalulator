@@ -459,7 +459,13 @@ const _fontCache={};
 async function fetchFontB64(url){
   if(_fontCache[url])return _fontCache[url];
   const resp=await fetch(url);
+  if(!resp.ok)return null;
   const buf=await resp.arrayBuffer();
+  // Walidacja sygnatury TTF (00 01 00 00 lub "true") — odrzuć HTML/404
+  const sig=new Uint8Array(buf,0,4);
+  const isTTF=(sig[0]===0&&sig[1]===1&&sig[2]===0&&sig[3]===0)||
+              (sig[0]===116&&sig[1]===114&&sig[2]===117&&sig[3]===101);
+  if(!isTTF)return null;
   const bytes=new Uint8Array(buf);
   let bin="";for(let i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);
   _fontCache[url]=btoa(bin);
@@ -475,17 +481,16 @@ async function generatePDF(){
   btn.disabled=true;btn.textContent="Generuję...";
 
   try{
-    // Load Roboto TTF from jsDelivr — jsPDF wymaga TTF, nie woff2
-    const BASE="https://cdn.jsdelivr.net/npm/roboto-fontface@0.10.0/fonts/roboto/";
+    // Load Roboto TTF — jsPDF wymaga TTF, nie woff/woff2
     const [fontR,fontB]=await Promise.all([
-      fetchFontB64(BASE+"Roboto-Regular.ttf").catch(()=>null),
-      fetchFontB64(BASE+"Roboto-Bold.ttf").catch(()=>null),
+      fetchFontB64("https://cdn.jsdelivr.net/gh/googlefonts/roboto@main/src/hinted/Roboto-Regular.ttf").catch(()=>null),
+      fetchFontB64("https://cdn.jsdelivr.net/gh/googlefonts/roboto@main/src/hinted/Roboto-Bold.ttf").catch(()=>null),
     ]);
 
     const {jsPDF}=window.jspdf;
-    const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+    let doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
 
-    // Register Roboto if loaded, fall back to helvetica gracefully
+    // Register Roboto + smoke test — jeśli coś nie tak, fresh doc + fallback na helvetica
     let useRoboto=false;
     if(fontR&&fontB){
       try{
@@ -493,8 +498,12 @@ async function generatePDF(){
         doc.addFont("Roboto-Regular.ttf","Roboto","normal");
         doc.addFileToVFS("Roboto-Bold.ttf",fontB);
         doc.addFont("Roboto-Bold.ttf","Roboto","bold");
+        doc.setFont("Roboto","normal");doc.setFontSize(1);doc.text("a",-999,-999);
         useRoboto=true;
-      }catch(e){console.warn("Font register failed",e);}
+      }catch(e){
+        console.warn("Font failed, falling back to helvetica:",e);
+        doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+      }
     }
 
     const F=useRoboto?"Roboto":"helvetica";
